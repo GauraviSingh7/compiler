@@ -11,6 +11,7 @@
 #include "symtable.h"
 #include "icg.h"
 #include "parser.h"
+#include "codegen.h"
 
 int main(int argc, char* argv[]) {
     if (argc < 2) { std::cerr << "Usage: compiler <source>\n"; return 1; }
@@ -71,8 +72,14 @@ int main(int argc, char* argv[]) {
     // TAC only printed when no errors
     if (allErrors.empty()) {
         icg.print();
+
+        // ── Code Generation ──────────────────────────────────
+        CodeGen cg(icg);
+        cg.generate();
+        cg.print();
+
     } else {
-        std::cout << "\n[TAC not generated — errors present]\n";
+        std::cout << "\n[TAC and target code not generated — errors present]\n";
     }
 
     return 0;
