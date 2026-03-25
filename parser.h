@@ -1,71 +1,70 @@
 // ============================================================
-// parser.h — Parser declaration
+// parser.h — Updated with ICG + SymbolTable integration
 // ============================================================
 #pragma once
 #include "lexer.h"
+#include "symtable.h"
+#include "icg.h"
 #include <vector>
 #include <string>
 #include <unordered_set>
 
 class Parser {
 public:
-    explicit Parser(Lexer& lexer);
+    Parser(Lexer& lexer, SymbolTable& sym, ICG& icg);
 
-    // Entry point — call this to parse the whole program
     void parse();
 
-    std::vector<std::string> errors;   // all parse errors collected
+    std::vector<std::string> errors;
     bool hasError() const { return !errors.empty(); }
 
 private:
-    Lexer&  lexer;
-    Token   current;   // current lookahead token
+    Lexer&       lexer;
+    SymbolTable& sym;
+    ICG&         icg;
+    Token        current;
 
-    // ── Token consumption ──────────────────────────────────
     void advance();
     bool check(TokenType t) const;
-    bool match(TokenType t);           // consume if match, else false
-    void expect(TokenType t, const std::string& msg);  // consume or error
-
-    // ── Error handling ─────────────────────────────────────
+    bool match(TokenType t);
+    void expect(TokenType t, const std::string& msg);
     void error(const std::string& msg);
     void synchronize(const std::unordered_set<TokenType>& follow);
 
-    // ── Grammar rule functions ─────────────────────────────
-    void parseProgram();
-    void parseVarDeclarations();       // optional var block
-    void parseVarDeclaration();        // single var line: id_list : type ;
-    void parseIdentifierList();        // id { , id }
-    void parseType();
-    void parseStandardType();
+    void        parseProgram();
+    void        parseVarDeclarations();
+    void        parseVarDeclaration();
+    void        parseIdentifierList(std::vector<std::string>& names);
+    void        parseType(SymbolKind& kind, int& arrSize);
+    void        parseStandardType();
 
-    void parseSubprogramDeclarations();
-    void parseSubprogramDeclaration();
-    void parseProcedureOrFunction(TokenType kind);
-    void parseArguments();
-    void parseParameterList();
-    void parseParameterGroup();
+    void        parseSubprogramDeclaration();
+    void        parseArguments();
+    void        parseParameterList();
+    void        parseParameterGroup();
 
-    void parseCompoundStatement();
-    void parseStatementList();
-    void parseStatement();
-    void parseAssignmentStatement(const std::string& idName, int idLine);
-    void parseIfStatement();
-    void parseWhileStatement();
-    void parseReadStatement();
-    void parseWriteStatement();
-    void parseProcedureCallStatement(const std::string& idName, int idLine);
+    void        parseCompoundStatement();
+    void        parseStatementList();
+    void        parseStatement();
+    void        parseAssignStatement(const std::string& name, int ln);
+    void        parseProcCallStatement(const std::string& name, int ln);
+    void        parseIfStatement();
+    void        parseWhileStatement();
+    void        parseReadStatement();
+    void        parseWriteStatement();
 
-    void parseExpression();
-    void parseSimpleExpression();
-    void parseTerm();
-    void parseFactor();
+    // Expression functions now RETURN the temp/var holding the result
+    std::string parseExpression();
+    std::string parseSimpleExpression();
+    std::string parseTerm();
+    std::string parseFactor();
 
-    void parseOutputList();
-    void parseOutputItem();
-    void parseExpressionList();
+    void        parseOutputList();
+    void        parseOutputItem();
+    std::string parseExpressionList(int& argCount);  // returns last, counts args
 
     bool isRelop() const;
     bool isAddop() const;
     bool isMulop() const;
+    std::string currentOpStr() const;  // token → operator string for TAC
 };
