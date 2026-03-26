@@ -52,6 +52,12 @@ public:
             std::cout << "\n";
         }
     }
+    std::vector<Symbol> getEntries() const {
+    std::vector<Symbol> result;
+    for (auto& nm : order)
+        result.push_back(table.at(nm));
+    return result;
+}
 
 private:
     std::unordered_map<std::string, Symbol> table;

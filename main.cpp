@@ -1,5 +1,5 @@
 // ============================================================
-// main.cpp — Lexer + Parser + ICG driver
+// main.cpp — Lexer + Parser + ICG + CodeGen + HTML Visualizer
 // ============================================================
 #include <iostream>
 #include <fstream>
@@ -12,6 +12,7 @@
 #include "icg.h"
 #include "parser.h"
 #include "codegen.h"
+#include "html_export.h"
 
 int main(int argc, char* argv[]) {
     if (argc < 2) { std::cerr << "Usage: compiler <source>\n"; return 1; }
@@ -53,10 +54,14 @@ int main(int argc, char* argv[]) {
     Parser      parser(lexer2, symtable, icg);
     parser.parse();
 
-    // Collect ALL errors (lex + parse)
+    // ── Collect ALL errors (lex + parse) ─────────────────────
     std::vector<std::string> allErrors;
     for (auto& e : lexer1.errors) allErrors.push_back(e);
     for (auto& e : parser.errors) allErrors.push_back(e);
+
+    // ── Code Generation (always run so cg exists for HTML) ───
+    CodeGen cg(icg);
+    cg.generate();
 
     // ── Print results ─────────────────────────────────────────
     symtable.print();
@@ -64,23 +69,18 @@ int main(int argc, char* argv[]) {
     std::cout << "\n====== PARSE RESULT ======\n";
     if (allErrors.empty()) {
         std::cout << "Parsing: PASSED — no errors.\n";
+        icg.print();
+        cg.print();
     } else {
         std::cout << "Errors found (" << allErrors.size() << "):\n";
         for (auto& e : allErrors) std::cout << "  " << e << "\n";
-    }
-
-    // TAC only printed when no errors
-    if (allErrors.empty()) {
-        icg.print();
-
-        // ── Code Generation ──────────────────────────────────
-        CodeGen cg(icg);
-        cg.generate();
-        cg.print();
-
-    } else {
         std::cout << "\n[TAC and target code not generated — errors present]\n";
     }
+
+    // ── Export HTML (always, for both success and error cases) 
+    std::string htmlPath = std::string(argv[1]) + ".html";
+    exportHTML(source, tokens, symtable, allErrors, icg, cg, htmlPath);
+    std::cout << "\n[Visualizer saved to: " << htmlPath << "]\n";
 
     return 0;
 }
