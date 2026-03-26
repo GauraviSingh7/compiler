@@ -1,5 +1,5 @@
 // ============================================================
-// parser.cpp — Full updated parser with TAC generation
+// parser.cpp — Recursive descent parser + TAC + AST tree
 // ============================================================
 #include "parser.h"
 #include <iostream>
@@ -13,11 +13,13 @@ static const std::unordered_set<TokenType> DECL_FOLLOW = {
     TokenType::KW_FUNCTION, TokenType::EOF_TOKEN
 };
 
+// ── Constructor ────────────────────────────────────────────
 Parser::Parser(Lexer& lex, SymbolTable& s, ICG& i)
     : lexer(lex), sym(s), icg(i), current(TokenType::EOF_TOKEN, "", 0) {
     advance();
 }
 
+// ── Token helpers ──────────────────────────────────────────
 void Parser::advance() {
     current = lexer.nextToken();
     while (current.type == TokenType::ERROR)
@@ -40,9 +42,11 @@ void Parser::synchronize(const std::unordered_set<TokenType>& follow) {
         if (follow.count(current.type)) return;
         else advance();
 }
+
+// ── Operator predicates ────────────────────────────────────
 bool Parser::isRelop() const {
-    return check(TokenType::EQUAL) || check(TokenType::NEQ)  ||
-           check(TokenType::LESS)  || check(TokenType::LEQ)  ||
+    return check(TokenType::EQUAL)   || check(TokenType::NEQ)  ||
+           check(TokenType::LESS)    || check(TokenType::LEQ)  ||
            check(TokenType::GREATER) || check(TokenType::GEQ);
 }
 bool Parser::isAddop() const {
@@ -71,380 +75,421 @@ std::string Parser::currentOpStr() const {
     }
 }
 
-// ── Program ────────────────────────────────────────────────
+// ── Entry point ────────────────────────────────────────────
 void Parser::parse() {
-    parseProgram();
+    treeRoot = std::make_shared<ASTNode>("program", "rule");
+    parseProgram(treeRoot);
     expect(TokenType::EOF_TOKEN, "Expected end of file");
 }
 
-void Parser::parseProgram() {
+// ── Program ────────────────────────────────────────────────
+// program → program id ; [var_decls] [subprograms] compound_stmt .
+void Parser::parseProgram(ASTNodePtr parent) {
+    auto node = parent->addChild("program-decl");
+
+    node->addChild(makeLeaf(current));
     expect(TokenType::KW_PROGRAM, "Expected 'program'");
-    std::string progName = current.lexeme;
+
+    node->addChild(makeLeaf(current));
     expect(TokenType::IDENTIFIER, "Expected program name");
-    expect(TokenType::SEMICOLON,  "Expected ';'");
+
+    node->addChild(makeLeaf(current));
+    expect(TokenType::SEMICOLON, "Expected ';'");
 
     if (check(TokenType::KW_VAR))
-        parseVarDeclarations();
+        parseVarDeclarations(node);
 
     while (check(TokenType::KW_PROCEDURE) || check(TokenType::KW_FUNCTION))
-        parseSubprogramDeclaration();
+        parseSubprogramDeclaration(node);
 
-    parseCompoundStatement();
+    parseCompoundStatement(node);
+
+    node->addChild(makeLeaf(current));
     expect(TokenType::DOT, "Expected '.' at end of program");
 }
 
-// ── Variable declarations (populate symbol table) ─────────
-void Parser::parseVarDeclarations() {
+// ── Variable declarations ──────────────────────────────────
+void Parser::parseVarDeclarations(ASTNodePtr parent) {
+    auto node = parent->addChild("var-declarations");
+    node->addChild(makeLeaf(current));
     expect(TokenType::KW_VAR, "Expected 'var'");
     while (check(TokenType::IDENTIFIER))
-        parseVarDeclaration();
+        parseVarDeclaration(node);
 }
 
-void Parser::parseVarDeclaration() {
+void Parser::parseVarDeclaration(ASTNodePtr parent) {
+    auto node = parent->addChild("var-decl");
     std::vector<std::string> names;
-    parseIdentifierList(names);
+    parseIdentifierList(node, names);
+    node->addChild(makeLeaf(current));
     expect(TokenType::COLON, "Expected ':'");
-
-    SymbolKind kind = SymbolKind::VARIABLE;
-    int arrSize = 0;
-    parseType(kind, arrSize);
+    SymbolKind kind = SymbolKind::VARIABLE; int arrSize = 0;
+    parseType(node, kind, arrSize);
+    node->addChild(makeLeaf(current));
     expect(TokenType::SEMICOLON, "Expected ';' after declaration");
-
-    // Register all declared names in the symbol table
-    for (auto& n : names)
-        sym.insert(n, kind, arrSize);
+    for (auto& n : names) sym.insert(n, kind, arrSize);
 }
 
-void Parser::parseIdentifierList(std::vector<std::string>& names) {
-    if (!check(TokenType::IDENTIFIER)) {
-        error("Expected identifier"); return;
-    }
+void Parser::parseIdentifierList(ASTNodePtr parent, std::vector<std::string>& names) {
+    auto node = parent->addChild("id-list");
+    if (!check(TokenType::IDENTIFIER)) { error("Expected identifier"); return; }
     names.push_back(current.lexeme);
-    advance();
-    while (match(TokenType::COMMA)) {
+    node->addChild(makeLeaf(current)); advance();
+    while (check(TokenType::COMMA)) {
+        node->addChild(makeLeaf(current)); advance(); // comma
         if (!check(TokenType::IDENTIFIER)) { error("Expected identifier after ','"); break; }
         names.push_back(current.lexeme);
-        advance();
+        node->addChild(makeLeaf(current)); advance();
     }
 }
 
-void Parser::parseType(SymbolKind& kind, int& arrSize) {
+void Parser::parseType(ASTNodePtr parent, SymbolKind& kind, int& arrSize) {
+    auto node = parent->addChild("type");
     if (check(TokenType::KW_ARRAY)) {
-        advance();
-        expect(TokenType::LBRACKET, "Expected '['");
+        node->addChild(makeLeaf(current)); advance();
+        node->addChild(makeLeaf(current)); expect(TokenType::LBRACKET, "Expected '['");
         arrSize = std::stoi(current.lexeme.empty() ? "0" : current.lexeme);
-        expect(TokenType::NUMBER,   "Expected array size");
-        expect(TokenType::RBRACKET, "Expected ']'");
-        expect(TokenType::KW_OF,    "Expected 'of'");
-        parseStandardType();
+        node->addChild(makeLeaf(current)); expect(TokenType::NUMBER, "Expected array size");
+        node->addChild(makeLeaf(current)); expect(TokenType::RBRACKET, "Expected ']'");
+        node->addChild(makeLeaf(current)); expect(TokenType::KW_OF, "Expected 'of'");
+        parseStandardType(node);
         kind = SymbolKind::ARRAY;
     } else {
-        parseStandardType();
+        parseStandardType(node);
         kind = SymbolKind::VARIABLE;
     }
 }
 
-void Parser::parseStandardType() {
-    if (!match(TokenType::KW_INTEGER))
-        error("Expected 'integer'");
+void Parser::parseStandardType(ASTNodePtr parent) {
+    auto node = parent->addChild("standard-type");
+    if (!check(TokenType::KW_INTEGER)) { error("Expected 'integer'"); return; }
+    node->addChild(makeLeaf(current)); advance();
 }
 
-// ── Subprograms ────────────────────────────────────────────
-void Parser::parseSubprogramDeclaration() {
-    SymbolKind k = check(TokenType::KW_PROCEDURE)
-                   ? SymbolKind::PROCEDURE : SymbolKind::FUNCTION;
-    advance();
+// ── Subprogram declarations ────────────────────────────────
+void Parser::parseSubprogramDeclaration(ASTNodePtr parent) {
+    auto node = parent->addChild("subprogram-decl");
+    SymbolKind k = check(TokenType::KW_PROCEDURE) ? SymbolKind::PROCEDURE : SymbolKind::FUNCTION;
+    node->addChild(makeLeaf(current)); advance();
     std::string name = current.lexeme;
-    expect(TokenType::IDENTIFIER, "Expected subprogram name");
+    node->addChild(makeLeaf(current)); expect(TokenType::IDENTIFIER, "Expected subprogram name");
     sym.insert(name, k);
-
-    parseArguments();
-
+    parseArguments(node);
     if (k == SymbolKind::FUNCTION) {
-        expect(TokenType::COLON, "Expected ':' after function args");
-        parseStandardType();
+        node->addChild(makeLeaf(current)); expect(TokenType::COLON, "Expected ':'");
+        parseStandardType(node);
     }
-    expect(TokenType::SEMICOLON, "Expected ';' after subprogram header");
-
-    if (check(TokenType::KW_VAR)) parseVarDeclarations();
+    node->addChild(makeLeaf(current)); expect(TokenType::SEMICOLON, "Expected ';' after header");
+    if (check(TokenType::KW_VAR)) parseVarDeclarations(node);
     while (check(TokenType::KW_PROCEDURE) || check(TokenType::KW_FUNCTION))
-        parseSubprogramDeclaration();
-
-    parseCompoundStatement();
-    expect(TokenType::SEMICOLON, "Expected ';' after subprogram body");
+        parseSubprogramDeclaration(node);
+    parseCompoundStatement(node);
+    node->addChild(makeLeaf(current)); expect(TokenType::SEMICOLON, "Expected ';' after body");
 }
 
-void Parser::parseArguments() {
+void Parser::parseArguments(ASTNodePtr parent) {
     if (!check(TokenType::LPAREN)) return;
-    advance();
-    if (!check(TokenType::RPAREN)) parseParameterList();
-    expect(TokenType::RPAREN, "Expected ')'");
+    auto node = parent->addChild("arguments");
+    node->addChild(makeLeaf(current)); advance();
+    if (!check(TokenType::RPAREN)) parseParameterList(node);
+    node->addChild(makeLeaf(current)); expect(TokenType::RPAREN, "Expected ')'");
 }
 
-void Parser::parseParameterList() {
-    parseParameterGroup();
-    while (match(TokenType::SEMICOLON)) {
-        if (check(TokenType::IDENTIFIER)) parseParameterGroup();
+void Parser::parseParameterList(ASTNodePtr parent) {
+    auto node = parent->addChild("param-list");
+    parseParameterGroup(node);
+    while (check(TokenType::SEMICOLON)) {
+        node->addChild(makeLeaf(current)); advance();
+        if (check(TokenType::IDENTIFIER)) parseParameterGroup(node);
         else break;
     }
 }
 
-void Parser::parseParameterGroup() {
+void Parser::parseParameterGroup(ASTNodePtr parent) {
+    auto node = parent->addChild("param-group");
     std::vector<std::string> names;
-    parseIdentifierList(names);
-    expect(TokenType::COLON, "Expected ':' in parameter");
+    parseIdentifierList(node, names);
+    node->addChild(makeLeaf(current)); expect(TokenType::COLON, "Expected ':'");
     SymbolKind k = SymbolKind::VARIABLE; int sz = 0;
-    parseType(k, sz);
+    parseType(node, k, sz);
     for (auto& n : names) sym.insert(n, k, sz);
 }
 
 // ── Compound statement ─────────────────────────────────────
-void Parser::parseCompoundStatement() {
-    expect(TokenType::KW_BEGIN, "Expected 'begin'");
-    parseStatementList();
-    expect(TokenType::KW_END, "Expected 'end'");
+void Parser::parseCompoundStatement(ASTNodePtr parent) {
+    auto node = parent->addChild("compound-stmt");
+    node->addChild(makeLeaf(current)); expect(TokenType::KW_BEGIN, "Expected 'begin'");
+    parseStatementList(node);
+    node->addChild(makeLeaf(current)); expect(TokenType::KW_END, "Expected 'end'");
 }
 
-void Parser::parseStatementList() {
-    parseStatement();
-    while (match(TokenType::SEMICOLON)) {
+void Parser::parseStatementList(ASTNodePtr parent) {
+    auto node = parent->addChild("stmt-list");
+    parseStatement(node);
+    while (check(TokenType::SEMICOLON)) {
+        node->addChild(makeLeaf(current)); advance();
         if (check(TokenType::KW_END) || check(TokenType::EOF_TOKEN)) break;
-        parseStatement();
+        parseStatement(node);
     }
 }
 
 // ── Statements ─────────────────────────────────────────────
-void Parser::parseStatement() {
+void Parser::parseStatement(ASTNodePtr parent) {
     if (check(TokenType::IDENTIFIER)) {
         std::string name = current.lexeme; int ln = current.line;
         advance();
         if (check(TokenType::ASSIGN) || check(TokenType::LBRACKET))
-            parseAssignStatement(name, ln);
+            parseAssignStatement(parent, name, ln);
         else if (check(TokenType::LPAREN))
-            parseProcCallStatement(name, ln);
-        // else: bare identifier — ignore (no-arg proc call)
+            parseProcCallStatement(parent, name, ln);
+        // else: bare identifier (no-arg proc call) — skip silently
 
-    } else if (check(TokenType::KW_BEGIN))  { parseCompoundStatement();
-    } else if (check(TokenType::KW_IF))     { parseIfStatement();
-    } else if (check(TokenType::KW_WHILE))  { parseWhileStatement();
-    } else if (check(TokenType::KW_READ))   { parseReadStatement();
-    } else if (check(TokenType::KW_WRITE))  { parseWriteStatement();
-    } else if (check(TokenType::KW_END)     ||
-               check(TokenType::KW_ELSE)    ||
-               check(TokenType::SEMICOLON)  ||
+    } else if (check(TokenType::KW_BEGIN))  { parseCompoundStatement(parent);
+    } else if (check(TokenType::KW_IF))     { parseIfStatement(parent);
+    } else if (check(TokenType::KW_WHILE))  { parseWhileStatement(parent);
+    } else if (check(TokenType::KW_READ))   { parseReadStatement(parent);
+    } else if (check(TokenType::KW_WRITE))  { parseWriteStatement(parent);
+    } else if (check(TokenType::KW_END)    ||
+               check(TokenType::KW_ELSE)   ||
+               check(TokenType::SEMICOLON) ||
                check(TokenType::EOF_TOKEN)) {
-        return; // empty statement
+        return; // empty statement — valid
     } else {
+        auto enode = parent->addChild("error: " + current.lexeme, "error");
+        (void)enode;
         error("Unexpected '" + current.lexeme + "' in statement");
         synchronize(STMT_FOLLOW);
     }
 }
 
 // id [ expr ] := expr   or   id := expr
-void Parser::parseAssignStatement(const std::string& name, int /*ln*/) {
+void Parser::parseAssignStatement(ASTNodePtr parent, const std::string& name, int /*ln*/) {
+    auto node = parent->addChild("assign-stmt");
+    node->addChild(makeLeaf(name + "\n[IDENTIFIER]"));
     std::string target = name;
-
     if (check(TokenType::LBRACKET)) {
-        advance();
-        std::string idx = parseExpression();
-        expect(TokenType::RBRACKET, "Expected ']'");
+        node->addChild(makeLeaf(current)); advance();
+        std::string idx = parseExpression(node);
+        node->addChild(makeLeaf(current)); expect(TokenType::RBRACKET, "Expected ']'");
         target = name + "[" + idx + "]";
     }
-    expect(TokenType::ASSIGN, "Expected ':='");
-    std::string val = parseExpression();
-    icg.emitCopy(val, target);   // target = val
+    node->addChild(makeLeaf(current)); expect(TokenType::ASSIGN, "Expected ':='");
+    std::string val = parseExpression(node);
+    icg.emitCopy(val, target);
 }
 
 // id ( expr_list )
-void Parser::parseProcCallStatement(const std::string& name, int /*ln*/) {
-    expect(TokenType::LPAREN, "Expected '('");
+void Parser::parseProcCallStatement(ASTNodePtr parent, const std::string& name, int /*ln*/) {
+    auto node = parent->addChild("proc-call");
+    node->addChild(makeLeaf(name + "\n[IDENTIFIER]"));
+    node->addChild(makeLeaf(current)); expect(TokenType::LPAREN, "Expected '('");
     int argc = 0;
-    if (!check(TokenType::RPAREN))
-        parseExpressionList(argc);
-    expect(TokenType::RPAREN, "Expected ')'");
+    if (!check(TokenType::RPAREN)) parseExpressionList(node, argc);
+    node->addChild(makeLeaf(current)); expect(TokenType::RPAREN, "Expected ')'");
     icg.emitCall(name, argc, false);
 }
 
 // if expr then stmt [ else stmt ]
-void Parser::parseIfStatement() {
-    expect(TokenType::KW_IF, "Expected 'if'");
-    std::string cond = parseExpression();
-    expect(TokenType::KW_THEN, "Expected 'then'");
+void Parser::parseIfStatement(ASTNodePtr parent) {
+    auto node = parent->addChild("if-stmt");
+    node->addChild(makeLeaf(current)); expect(TokenType::KW_IF, "Expected 'if'");
+    std::string cond = parseExpression(node);
+    node->addChild(makeLeaf(current)); expect(TokenType::KW_THEN, "Expected 'then'");
 
-    // if NOT cond → jump to else/end
-    std::string notCond = icg.emitUnary("not", cond);
+    std::string notCond   = icg.emitUnary("not", cond);
     std::string labelElse = icg.newLabel();
     std::string labelEnd  = icg.newLabel();
     icg.emitIf(notCond, labelElse);
 
-    parseStatement();    // then-branch
+    auto thenNode = node->addChild("then-branch");
+    parseStatement(thenNode);
 
     if (check(TokenType::KW_ELSE)) {
-        icg.emitGoto(labelEnd);        // skip else after then
+        icg.emitGoto(labelEnd);
         icg.emitLabel(labelElse);
-        advance();                     // consume 'else'
-        parseStatement();              // else-branch
+        node->addChild(makeLeaf(current)); advance(); // consume 'else'
+        auto elseNode = node->addChild("else-branch");
+        parseStatement(elseNode);
         icg.emitLabel(labelEnd);
     } else {
-        icg.emitLabel(labelElse);      // no else → labelElse = labelEnd
+        icg.emitLabel(labelElse);
     }
 }
 
 // while expr do stmt
-void Parser::parseWhileStatement() {
-    expect(TokenType::KW_WHILE, "Expected 'while'");
+void Parser::parseWhileStatement(ASTNodePtr parent) {
+    auto node = parent->addChild("while-stmt");
+    node->addChild(makeLeaf(current)); expect(TokenType::KW_WHILE, "Expected 'while'");
 
     std::string labelStart = icg.newLabel();
     std::string labelEnd   = icg.newLabel();
     icg.emitLabel(labelStart);
 
-    std::string cond = parseExpression();
-    expect(TokenType::KW_DO, "Expected 'do'");
+    std::string cond = parseExpression(node);
+    node->addChild(makeLeaf(current)); expect(TokenType::KW_DO, "Expected 'do'");
 
     std::string notCond = icg.emitUnary("not", cond);
     icg.emitIf(notCond, labelEnd);
 
-    parseStatement();    // loop body
+    auto bodyNode = node->addChild("loop-body");
+    parseStatement(bodyNode);
 
     icg.emitGoto(labelStart);
     icg.emitLabel(labelEnd);
 }
 
 // read ( id_list )
-void Parser::parseReadStatement() {
-    expect(TokenType::KW_READ, "Expected 'read'");
-    expect(TokenType::LPAREN,  "Expected '('");
-    // parse identifier list and emit read for each
-    if (!check(TokenType::IDENTIFIER)) {
-        error("Expected identifier in read"); return;
-    }
-    icg.emitRead(current.lexeme); advance();
-    while (match(TokenType::COMMA)) {
+void Parser::parseReadStatement(ASTNodePtr parent) {
+    auto node = parent->addChild("read-stmt");
+    node->addChild(makeLeaf(current)); expect(TokenType::KW_READ, "Expected 'read'");
+    node->addChild(makeLeaf(current)); expect(TokenType::LPAREN, "Expected '('");
+    if (!check(TokenType::IDENTIFIER)) { error("Expected identifier in read"); return; }
+    icg.emitRead(current.lexeme);
+    node->addChild(makeLeaf(current)); advance();
+    while (check(TokenType::COMMA)) {
+        node->addChild(makeLeaf(current)); advance();
         if (!check(TokenType::IDENTIFIER)) { error("Expected identifier"); break; }
-        icg.emitRead(current.lexeme); advance();
+        icg.emitRead(current.lexeme);
+        node->addChild(makeLeaf(current)); advance();
     }
-    expect(TokenType::RPAREN, "Expected ')'");
+    node->addChild(makeLeaf(current)); expect(TokenType::RPAREN, "Expected ')'");
 }
 
 // write ( output_list )
-void Parser::parseWriteStatement() {
-    expect(TokenType::KW_WRITE, "Expected 'write'");
-    expect(TokenType::LPAREN,   "Expected '('");
-    parseOutputList();
-    expect(TokenType::RPAREN, "Expected ')'");
+void Parser::parseWriteStatement(ASTNodePtr parent) {
+    auto node = parent->addChild("write-stmt");
+    node->addChild(makeLeaf(current)); expect(TokenType::KW_WRITE, "Expected 'write'");
+    node->addChild(makeLeaf(current)); expect(TokenType::LPAREN, "Expected '('");
+    parseOutputList(node);
+    node->addChild(makeLeaf(current)); expect(TokenType::RPAREN, "Expected ')'");
 }
 
-void Parser::parseOutputList() {
-    parseOutputItem();
-    while (match(TokenType::COMMA)) parseOutputItem();
+void Parser::parseOutputList(ASTNodePtr parent) {
+    auto node = parent->addChild("output-list");
+    parseOutputItem(node);
+    while (check(TokenType::COMMA)) {
+        node->addChild(makeLeaf(current)); advance();
+        parseOutputItem(node);
+    }
 }
 
-void Parser::parseOutputItem() {
+void Parser::parseOutputItem(ASTNodePtr parent) {
     if (check(TokenType::STRING)) {
         icg.emitWrite("\"" + current.lexeme + "\"");
-        advance();
+        parent->addChild(makeLeaf(current)); advance();
     } else {
-        std::string val = parseExpression();
+        std::string val = parseExpression(parent);
         icg.emitWrite(val);
     }
 }
 
-// expression_list: emit param for each, return last result, count in argc
-std::string Parser::parseExpressionList(int& argc) {
-    std::string last = parseExpression();
-    icg.emitParam(last);
-    argc = 1;
-    while (match(TokenType::COMMA)) {
-        last = parseExpression();
-        icg.emitParam(last);
-        argc++;
+// expression_list → expr { , expr }  — emits params, counts args
+std::string Parser::parseExpressionList(ASTNodePtr parent, int& argc) {
+    auto node = parent->addChild("expr-list");
+    std::string last = parseExpression(node);
+    icg.emitParam(last); argc = 1;
+    while (check(TokenType::COMMA)) {
+        node->addChild(makeLeaf(current)); advance();
+        last = parseExpression(node);
+        icg.emitParam(last); argc++;
     }
     return last;
 }
 
-// ── Expressions — return the temp/var holding the value ───
+// ── Expressions ────────────────────────────────────────────
 
 // expression → simple_expression [ relop simple_expression ]
-std::string Parser::parseExpression() {
-    std::string left = parseSimpleExpression();
+std::string Parser::parseExpression(ASTNodePtr parent) {
+    auto node = parent->addChild("expr");
+    std::string left = parseSimpleExpression(node);
     if (isRelop()) {
-        std::string op = currentOpStr(); advance();
-        std::string right = parseSimpleExpression();
+        std::string op = currentOpStr();
+        node->addChild(makeLeaf(current)); advance();
+        std::string right = parseSimpleExpression(node);
         return icg.emitBinary(op, left, right);
     }
     return left;
 }
 
 // simple_expression → [sign] term { addop term }
-std::string Parser::parseSimpleExpression() {
+std::string Parser::parseSimpleExpression(ASTNodePtr parent) {
+    auto node = parent->addChild("simple-expr");
     bool negate = false;
-    if (check(TokenType::MINUS)) { negate = true; advance(); }
-    else if (check(TokenType::PLUS)) { advance(); }
-
-    std::string result = parseTerm();
-
-    if (negate)
-        result = icg.emitUnary("-", result);
-
+    if (check(TokenType::MINUS)) {
+        negate = true;
+        node->addChild(makeLeaf(current)); advance();
+    } else if (check(TokenType::PLUS)) {
+        node->addChild(makeLeaf(current)); advance();
+    }
+    std::string result = parseTerm(node);
+    if (negate) result = icg.emitUnary("-", result);
     while (isAddop()) {
-        std::string op = currentOpStr(); advance();
-        std::string right = parseTerm();
+        std::string op = currentOpStr();
+        node->addChild(makeLeaf(current)); advance();
+        std::string right = parseTerm(node);
         result = icg.emitBinary(op, result, right);
     }
     return result;
 }
 
 // term → factor { mulop factor }
-std::string Parser::parseTerm() {
-    std::string result = parseFactor();
+std::string Parser::parseTerm(ASTNodePtr parent) {
+    auto node = parent->addChild("term");
+    std::string result = parseFactor(node);
     while (isMulop()) {
-        std::string op = currentOpStr(); advance();
-        std::string right = parseFactor();
+        std::string op = currentOpStr();
+        node->addChild(makeLeaf(current)); advance();
+        std::string right = parseFactor(node);
         result = icg.emitBinary(op, result, right);
     }
     return result;
 }
 
 // factor → id | id[expr] | id(args) | num | string | (expr) | not factor
-std::string Parser::parseFactor() {
-    if (check(TokenType::IDENTIFIER)) {
-        std::string name = current.lexeme; advance();
+std::string Parser::parseFactor(ASTNodePtr parent) {
+    auto node = parent->addChild("factor");
 
+    if (check(TokenType::IDENTIFIER)) {
+        std::string name = current.lexeme;
+        node->addChild(makeLeaf(current)); advance();
         if (check(TokenType::LBRACKET)) {
-            advance();
-            std::string idx = parseExpression();
-            expect(TokenType::RBRACKET, "Expected ']'");
+            node->addChild(makeLeaf(current)); advance();
+            std::string idx = parseExpression(node);
+            node->addChild(makeLeaf(current)); expect(TokenType::RBRACKET, "Expected ']'");
             return name + "[" + idx + "]";
         }
         if (check(TokenType::LPAREN)) {
-            advance();
+            node->addChild(makeLeaf(current)); advance();
             int argc = 0;
-            if (!check(TokenType::RPAREN)) parseExpressionList(argc);
-            expect(TokenType::RPAREN, "Expected ')'");
+            if (!check(TokenType::RPAREN)) parseExpressionList(node, argc);
+            node->addChild(makeLeaf(current)); expect(TokenType::RPAREN, "Expected ')'");
             return icg.emitCall(name, argc, true);
         }
         return name;
 
     } else if (check(TokenType::NUMBER)) {
-        std::string val = current.lexeme; advance();
+        std::string val = current.lexeme;
+        node->addChild(makeLeaf(current)); advance();
         return val;
 
     } else if (check(TokenType::STRING)) {
-        std::string val = "\"" + current.lexeme + "\""; advance();
+        std::string val = "\"" + current.lexeme + "\"";
+        node->addChild(makeLeaf(current)); advance();
         return val;
 
     } else if (check(TokenType::LPAREN)) {
-        advance();
-        std::string val = parseExpression();
-        expect(TokenType::RPAREN, "Expected ')'");
+        node->addChild(makeLeaf(current)); advance();
+        std::string val = parseExpression(node);
+        node->addChild(makeLeaf(current)); expect(TokenType::RPAREN, "Expected ')'");
         return val;
 
     } else if (check(TokenType::KW_NOT)) {
-        advance();
-        std::string val = parseFactor();
+        node->addChild(makeLeaf(current)); advance();
+        std::string val = parseFactor(node);
         return icg.emitUnary("not", val);
 
     } else {
+        node->addChild(std::make_shared<ASTNode>("error: " + current.lexeme, "error"));
         error("Expected factor — got '" + current.lexeme + "'");
         synchronize(STMT_FOLLOW);
         return "__err__";

@@ -1,15 +1,42 @@
 // ============================================================
-// html_export.h — Write compiler output to a styled HTML file
+// html_export.h — Compiler output → styled HTML with Parse Tree
 // ============================================================
 #pragma once
 #include "symtable.h"
 #include "icg.h"
 #include "codegen.h"
+#include "ast.h"
+#include "token_printer.h"
 #include <string>
 #include <vector>
 #include <fstream>
 #include <sstream>
 
+// ── Recursively emit JS tree-construction calls ────────────
+inline void buildTreeJS(std::ofstream& f, ASTNodePtr node,
+                        const std::string& parentVar, int& id)
+{
+    int myId = id++;
+    std::string var = "n" + std::to_string(myId);
+
+    // Escape label for single-quoted JS string
+    std::string escaped;
+    for (char c : node->label) {
+        if      (c == '\'') escaped += "\\'";
+        else if (c == '\\') escaped += "\\\\";
+        else if (c == '\n') escaped += "\\n";
+        else if (c == '"')  escaped += "\\\"";
+        else                escaped += c;
+    }
+
+    f << "var " << var << " = addNode("
+      << parentVar << ", '" << escaped << "', '" << node->kind << "');\n";
+
+    for (auto& child : node->children)
+        buildTreeJS(f, child, var, id);
+}
+
+// ── Main export function ───────────────────────────────────
 inline void exportHTML(
     const std::string&              sourceCode,
     const std::vector<Token>&       tokens,
@@ -17,12 +44,13 @@ inline void exportHTML(
     const std::vector<std::string>& allErrors,
     const ICG&                      icg,
     const CodeGen&                  cg,
+    ASTNodePtr                      treeRoot,
     const std::string&              outPath)
 {
     std::ofstream f(outPath);
     if (!f.is_open()) return;
 
-    // ── helpers ──────────────────────────────────────────────
+    // HTML-escape helper
     auto esc = [](const std::string& s) {
         std::string r;
         for (char c : s) {
@@ -35,6 +63,7 @@ inline void exportHTML(
         return r;
     };
 
+    // ── HTML head + styles ────────────────────────────────
     f << R"html(<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -43,110 +72,132 @@ inline void exportHTML(
 <title>Compiler Visualizer</title>
 <style>
   :root {
-    --bg-dark:    #f8f6f1;
-    --bg-light:   #fffbf7;
-    --panel:      #fef9f3;
-    --border:     #e8dfd5;
-    --accent:     #d97706;
-    --accent-dim: #f5a962;
-    --accent-light: #fcd5a4;
-    --success:    #059669;
-    --error:      #dc2626;
-    --text-dark:  #2d2621;
-    --text-muted: #8b8077;
-    --mono:       'Fira Code', 'JetBrains Mono', monospace;
-    --serif:      'Georgia', 'Times New Roman', serif;
+    --bg-base:    #0a0e27;
+    --bg-light:   #0f1429;
+    --panel-bg:   #111d42;
+    --border:     #1e2d5a;
+    --border-light: #2a3a5a;
+    --accent:     #7c6af7;
+    --accent-glow: #a78bfa;
+    --green:      #4ade80;
+    --red:        #ff6b6b;
+    --yellow:     #fbbf24;
+    --cyan:       #22d3ee;
+    --text-main:  #e8f0ff;
+    --text-sec:   #b0c4de;
+    --text-muted: #6b7d9f;
+    --mono:       'Fira Code','Cascadia Code','Consolas',monospace;
+    --sans:       -apple-system,'Segoe UI','Helvetica Neue',sans-serif;
   }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { box-sizing:border-box; margin:0; padding:0; }
 
   body {
-    background: var(--bg-light);
-    color: var(--text-dark);
-    font-family: -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif;
+    background: linear-gradient(135deg, var(--bg-base) 0%, #0d1a3d 100%);
+    color: var(--text-main);
+    font-family: var(--sans);
     min-height: 100vh;
     padding: 48px 32px;
     line-height: 1.6;
+    position: relative;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: 
+      radial-gradient(circle at 20% 50%, rgba(124,106,247,0.1) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(34,211,238,0.05) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
   }
 
   h1 {
-    font-family: var(--serif);
     text-align: center;
-    font-size: 2.2rem;
-    font-weight: 300;
-    letter-spacing: 0.5px;
-    color: var(--text-dark);
+    font-size: 2.4rem;
+    font-weight: 200;
+    letter-spacing: 2px;
+    color: var(--text-main);
     margin-bottom: 8px;
-    text-rendering: optimizeLegibility;
+    position: relative;
+    z-index: 1;
+    text-shadow: 0 4px 20px rgba(124,106,247,0.15);
   }
 
   .subtitle {
     text-align: center;
     color: var(--text-muted);
     font-size: 0.95rem;
-    margin-bottom: 32px;
+    margin-bottom: 36px;
     font-weight: 400;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.5px;
+    position: relative;
+    z-index: 1;
   }
 
-  /* Status badge */
   .status {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 24px;
-    border-radius: 6px;
+    padding: 10px 26px;
+    border-radius: 50px;
     font-size: 0.9rem;
-    font-weight: 500;
-    margin: 0 auto 32px;
-    display: flex;
-    justify-content: center;
+    font-weight: 600;
+    margin: 0 auto 36px;
     width: fit-content;
-    letter-spacing: 0.3px;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    position: relative;
+    z-index: 1;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
   }
 
   .status.ok {
-    background: #ecfdf5;
-    border: 1.5px solid var(--success);
-    color: var(--success);
+    background: rgba(74,222,128,0.08);
+    border: 1px solid rgba(74,222,128,0.3);
+    color: #86efac;
   }
 
   .status.err {
-    background: #fef2f2;
-    border: 1.5px solid var(--error);
-    color: var(--error);
+    background: rgba(255,107,107,0.08);
+    border: 1px solid rgba(255,107,107,0.3);
+    color: #ff8787;
   }
 
   /* Tab bar */
   .tabs {
     display: flex;
     gap: 0;
-    margin-bottom: 0;
     flex-wrap: wrap;
-    border-bottom: 2px solid var(--border);
+    border-bottom: 2px solid var(--border-light);
+    position: relative;
+    z-index: 1;
   }
 
   .tab {
-    padding: 12px 24px;
+    padding: 14px 26px;
     cursor: pointer;
     font-size: 0.9rem;
     font-weight: 500;
     background: transparent;
     border: none;
     color: var(--text-muted);
-    transition: all 0.2s ease;
+    transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
     position: relative;
-    letter-spacing: 0.2px;
+    letter-spacing: 0.3px;
   }
 
   .tab:hover {
-    color: var(--text-dark);
-    background: rgba(217, 119, 6, 0.04);
+    color: var(--text-main);
+    background: rgba(124,106,247,0.05);
   }
 
   .tab.active {
-    color: var(--accent);
+    color: var(--accent-glow);
   }
 
   .tab.active::after {
@@ -155,74 +206,56 @@ inline void exportHTML(
     bottom: -2px;
     left: 0;
     right: 0;
-    height: 2px;
-    background: var(--accent);
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent) 0%, var(--accent-glow) 100%);
+    box-shadow: 0 0 16px rgba(124,106,247,0.5);
   }
 
   /* Panels */
   .panel-wrap {
-    background: var(--panel);
-    padding: 28px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    min-height: 350px;
+    background: var(--panel-bg);
+    padding: 32px;
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    min-height: 400px;
+    position: relative;
+    z-index: 1;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+    backdrop-filter: blur(10px);
   }
 
-  .panel {
-    display: none;
-  }
+  .panel { display: none; }
+  .panel.active { display: block; animation: slideIn 0.3s cubic-bezier(0.4,0,0.2,1); }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
-  .panel.active {
-    display: block;
-    animation: fadeIn 0.2s ease;
-  }
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(2px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* Code blocks */
+  /* Source listing */
   pre {
     font-family: var(--mono);
     font-size: 0.85rem;
-    line-height: 1.8;
+    line-height: 1.9;
     white-space: pre-wrap;
     word-break: break-word;
-    color: var(--text-dark);
   }
 
   .line {
     display: flex;
     gap: 16px;
-    padding: 0;
+    padding: 2px 0;
+    transition: background 0.15s;
   }
+
+  .line:hover { background: rgba(124,106,247,0.08); }
 
   .ln {
     color: var(--text-muted);
-    min-width: 40px;
+    min-width: 42px;
     text-align: right;
     user-select: none;
     flex-shrink: 0;
-  }
-
-  .src {
-    color: var(--text-dark);
-    flex: 1;
-  }
-
-  .err-line .src {
-    color: var(--error);
     font-weight: 500;
   }
 
-  .err-msg {
-    color: var(--error);
-    padding-left: 56px;
-    font-size: 0.8rem;
-    margin-top: 4px;
-  }
+  .src { color: var(--text-main); flex: 1; }
 
   /* Token table */
   table {
@@ -234,117 +267,59 @@ inline void exportHTML(
 
   th {
     text-align: left;
-    padding: 10px 14px;
-    border-bottom: 2px solid var(--border);
+    padding: 12px 16px;
     color: var(--text-muted);
-    font-weight: 600;
+    border-bottom: 2px solid var(--border-light);
+    font-size: 0.7rem;
     text-transform: uppercase;
-    font-size: 0.75rem;
-    letter-spacing: 0.5px;
-    background: rgba(217, 119, 6, 0.02);
+    letter-spacing: 0.8px;
+    font-weight: 700;
+    background: rgba(124,106,247,0.04);
   }
 
   td {
-    padding: 8px 14px;
+    padding: 10px 16px;
     border-bottom: 1px solid var(--border);
-    color: var(--text-dark);
+    transition: background 0.15s;
   }
 
-  tr:hover td {
-    background: rgba(217, 119, 6, 0.04);
-  }
+  tr:hover td { background: rgba(124,106,247,0.08); }
 
-  .kw {
-    color: var(--accent);
-    font-weight: 600;
-  }
-
-  .id {
-    color: var(--text-dark);
-    font-weight: 500;
-  }
-
-  .num {
-    color: #059669;
-  }
-
-  .str {
-    color: #059669;
-  }
-
-  .sym {
-    color: var(--text-dark);
-  }
-
-  .err {
-    color: var(--error);
-    font-weight: 600;
-  }
+  .kw { color: var(--accent-glow); font-weight: 700; }
+  .id { color: var(--cyan); font-weight: 500; }
+  .num { color: var(--yellow); }
+  .str { color: var(--green); }
+  .sym { color: var(--text-main); }
+  .err { color: var(--red); font-weight: 700; }
 
   /* Symbol table */
   .sym-row {
     display: flex;
     align-items: center;
     gap: 14px;
-    padding: 10px 14px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
   }
 
-  .sym-row:hover {
-    background: rgba(217, 119, 6, 0.04);
-  }
+  .sym-row:hover { background: rgba(124,106,247,0.08); }
 
   .sym-name {
     font-family: var(--mono);
-    color: var(--text-dark);
+    color: var(--cyan);
     min-width: 140px;
-    font-weight: 500;
+    font-weight: 600;
   }
 
   .sym-kind {
-    font-size: 0.75rem;
-    padding: 4px 10px;
-    border-radius: 4px;
-    background: rgba(217, 119, 6, 0.1);
-    color: var(--accent);
-    border: 1px solid rgba(217, 119, 6, 0.2);
-    font-weight: 600;
-    letter-spacing: 0.2px;
-  }
-
-  /* TAC & Target code */
-  .code-line {
-    display: flex;
-    gap: 16px;
-    padding: 4px 0;
-  }
-
-  .code-ln {
-    color: var(--text-muted);
-    min-width: 40px;
-    text-align: right;
-    user-select: none;
-    flex-shrink: 0;
-  }
-
-  .label-line .code-op,
-  .label-line .code-args {
-    color: var(--accent);
-    font-weight: 600;
-  }
-
-  .comment-line {
-    color: var(--text-muted);
-    font-style: italic;
-  }
-
-  .code-op {
-    color: var(--accent);
-    font-weight: 500;
-  }
-
-  .code-args {
-    color: var(--text-dark);
+    font-size: 0.7rem;
+    padding: 4px 12px;
+    border-radius: 6px;
+    background: rgba(124,106,247,0.15);
+    color: var(--accent-glow);
+    border: 1px solid rgba(124,106,247,0.3);
+    font-weight: 700;
+    letter-spacing: 0.3px;
   }
 
   /* Error list */
@@ -352,106 +327,158 @@ inline void exportHTML(
     display: flex;
     gap: 12px;
     align-items: flex-start;
-    padding: 12px 14px;
-    margin-bottom: 8px;
-    background: #fef2f2;
-    border: 1px solid rgba(220, 38, 38, 0.2);
-    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 10px;
+    background: rgba(255,107,107,0.08);
+    border: 1px solid rgba(255,107,107,0.25);
+    border-radius: 8px;
     font-family: var(--mono);
     font-size: 0.85rem;
+    transition: all 0.2s;
   }
 
-  .err-icon {
-    color: var(--error);
-    font-weight: 700;
-    flex-shrink: 0;
-    margin-top: 2px;
+  .err-item:hover {
+    background: rgba(255,107,107,0.12);
+    border-color: rgba(255,107,107,0.4);
   }
 
-  /* Two-col layout for TAC + Target */
+  .err-icon { color: var(--red); font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+
+  /* TAC + target two-column */
   .two-col {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 28px;
+    gap: 32px;
   }
+
+  @media(max-width:900px) { .two-col { grid-template-columns: 1fr; } }
 
   .col-title {
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 2px solid var(--border);
+    letter-spacing: 1.2px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .col-title::before {
     content: '';
-    display: inline-block;
-    width: 4px;
-    height: 4px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: var(--accent);
-    margin-right: 8px;
+    box-shadow: 0 0 12px var(--accent);
   }
 
-  @media (max-width: 900px) {
-    .two-col {
-      grid-template-columns: 1fr;
-      gap: 24px;
-    }
+  .code-line {
+    display: flex;
+    gap: 16px;
+    padding: 2px 0;
+    transition: background 0.15s;
   }
 
-  /* Empty state */
+  .code-line:hover { background: rgba(124,106,247,0.08); }
+
+  .code-ln {
+    color: var(--text-muted);
+    min-width: 40px;
+    text-align: right;
+    user-select: none;
+    flex-shrink: 0;
+    font-weight: 500;
+  }
+
+  .label-line .code-args {
+    color: var(--yellow);
+    font-weight: 700;
+  }
+
+  .comment-line { color: var(--text-muted); font-style: italic; }
+  .code-args { color: var(--text-main); font-family: var(--mono); font-size: 0.85rem; }
+
   .empty-state {
     text-align: center;
-    padding: 40px 20px;
+    padding: 60px 20px;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+  }
+
+  /* Parse Tree panel */
+  #treepanel { overflow: auto; }
+
+  .tree-hint {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    background: rgba(124,106,247,0.08);
+    border-radius: 8px;
+    border: 1px solid var(--border-light);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  #treesvg { overflow: auto; cursor: grab; }
+  #treesvg:active { cursor: grabbing; }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
     color: var(--text-muted);
   }
 
-  .empty-state p {
-    font-size: 0.95rem;
-    margin: 0;
-  }
-
-  /* Responsive */
-  @media (max-width: 600px) {
-    body { padding: 24px 16px; }
-    h1 { font-size: 1.8rem; }
-    .tabs { gap: 2px; }
-    .tab { padding: 10px 16px; font-size: 0.85rem; }
-    pre { font-size: 0.8rem; }
-    .line { gap: 8px; }
+  .legend-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    flex-shrink: 0;
   }
 </style>
 </head>
 <body>
 
-<h1>Compiler Visualizer</h1>
-<p class="subtitle">Full pipeline — Lexer → Parser → ICG → Code Generator</p>
+<h1>&#9881; Compiler Visualizer</h1>
+<p class="subtitle">Lexer &rarr; Parser &rarr; ICG &rarr; Code Generator</p>
 )html";
 
-    // ── Status badge ─────────────────────────────────────────
+    // ── Status badge ──────────────────────────────────────
     if (allErrors.empty())
-        f << R"(<div class="status ok">✓ Compilation successful</div>)" "\n";
+        f << "<div class=\"status ok\">&#10003; Compilation successful &mdash; no errors</div>\n";
     else
-        f << "<div class=\"status err\">✕ " << allErrors.size()
+        f << "<div class=\"status err\">&#10007; " << allErrors.size()
           << " error" << (allErrors.size() == 1 ? "" : "s") << " found</div>\n";
 
-    // ── Tab bar ───────────────────────────────────────────────
+    // ── Tab bar ───────────────────────────────────────────
     f << R"html(
 <div class="tabs">
   <div class="tab active" onclick="show('source',this)">Source</div>
   <div class="tab"        onclick="show('tokens',this)">Tokens</div>
   <div class="tab"        onclick="show('symtab',this)">Symbol Table</div>
   <div class="tab"        onclick="show('errors',this)">Errors</div>
+  <div class="tab"        onclick="show('treepanel',this)">Parse Tree</div>
   <div class="tab"        onclick="show('codepanel',this)">TAC &amp; Target</div>
 </div>
 <div class="panel-wrap">
 )html";
 
-    // ── Tab 1: Source listing ─────────────────────────────────
+    // ── Tab 1: Source ─────────────────────────────────────
     f << "<div class='panel active' id='source'><pre>\n";
     {
         std::istringstream ss(sourceCode);
@@ -465,28 +492,28 @@ inline void exportHTML(
     }
     f << "</pre></div>\n";
 
-    // ── Tab 2: Token stream ───────────────────────────────────
+    // ── Tab 2: Tokens ─────────────────────────────────────
     f << "<div class='panel' id='tokens'>"
       << "<table><tr><th>Line</th><th>Type</th><th>Lexeme</th></tr>\n";
     for (auto& t : tokens) {
         if (t.type == TokenType::EOF_TOKEN) break;
         std::string cls = "sym";
         std::string tn  = tokenTypeName(t.type);
-        if      (tn.substr(0,2) == "KW") cls = "kw";
-        else if (tn == "IDENTIFIER")     cls = "id";
-        else if (tn == "NUMBER")         cls = "num";
-        else if (tn == "STRING")         cls = "str";
-        else if (tn == "ERROR")          cls = "err";
+        if      (tn.size() >= 2 && tn.substr(0,2) == "KW") cls = "kw";
+        else if (tn == "IDENTIFIER") cls = "id";
+        else if (tn == "NUMBER")     cls = "num";
+        else if (tn == "STRING")     cls = "str";
+        else if (tn == "ERROR")      cls = "err";
         f << "<tr><td>" << t.line << "</td>"
           << "<td class='" << cls << "'>" << esc(tn) << "</td>"
           << "<td class='" << cls << "'>" << esc(t.lexeme) << "</td></tr>\n";
     }
     f << "</table></div>\n";
 
-    // ── Tab 3: Symbol table ───────────────────────────────────
+    // ── Tab 3: Symbol Table ───────────────────────────────
     f << "<div class='panel' id='symtab'>\n";
     if (symtable.getEntries().empty()) {
-        f << "<div class='empty-state'><p>No symbols defined.</p></div>\n";
+        f << "<div class='empty-state'>No symbols defined.</div>\n";
     } else {
         for (auto& entry : symtable.getEntries()) {
             std::string kind;
@@ -504,18 +531,201 @@ inline void exportHTML(
     }
     f << "</div>\n";
 
-    // ── Tab 4: Errors ─────────────────────────────────────────
+    // ── Tab 4: Errors ─────────────────────────────────────
     f << "<div class='panel' id='errors'>\n";
     if (allErrors.empty()) {
-        f << "<div class='empty-state'><p>✓ No errors detected.</p></div>\n";
+        f << "<div class='empty-state'>&#10003; No errors detected.</div>\n";
     } else {
         for (auto& e : allErrors)
-            f << "<div class='err-item'><span class='err-icon'>✕</span>"
+            f << "<div class='err-item'>"
+              << "<span class='err-icon'>&#10007;</span>"
               << "<span>" << esc(e) << "</span></div>\n";
     }
     f << "</div>\n";
 
-    // ── Tab 5: TAC + Target code side by side ─────────────────
+    // ── Tab 5: Parse Tree ─────────────────────────────────
+    f << "<div class='panel' id='treepanel'>\n";
+    f << "<div class='legend'>"
+      << "<span class='legend-item'><span class='legend-dot' style='background:#1e1b4b;border:1.5px solid #7c6af7'></span>Grammar rule</span>"
+      << "<span class='legend-item'><span class='legend-dot' style='background:#0c4a6e;border:1.5px solid #22d3ee'></span>Token leaf</span>"
+      << "<span class='legend-item'><span class='legend-dot' style='background:#450a0a;border:1.5px solid #f87171'></span>Error node</span>"
+      << "</div>\n";
+    f << "<div class='tree-hint'>&#128161; Click any node to collapse / expand its subtree.</div>\n";
+    f << "<div id='treesvg'></div>\n";
+
+    // ── Emit JS tree data ─────────────────────────────────
+    f << "<script>\n";
+    f << "const NODE_W=150, NODE_H=40, H_GAP=18, V_GAP=56;\n\n";
+
+    f << "function addNode(parent, label, kind) {\n"
+      << "  var n={label:label, kind:kind, children:[], _collapsed:false, _hidden:false};\n"
+      << "  if(parent) parent.children.push(n);\n"
+      << "  return n;\n"
+      << "}\n\n";
+
+    // Emit tree structure from AST
+    f << "var root = addNode(null, '" << (treeRoot ? treeRoot->label : "program") << "', 'rule');\n";
+    if (treeRoot) {
+        int id = 1;
+        for (auto& child : treeRoot->children)
+            buildTreeJS(f, child, "root", id);
+    }
+
+    // Layout + render engine
+    f << R"js(
+function layout(node, depth, counter) {
+  node._y = depth * (NODE_H + V_GAP);
+  if (!node.children || node.children.length === 0 || node._collapsed) {
+    node._x = counter.v++ * (NODE_W + H_GAP);
+  } else {
+    var visible = node.children.filter(function(c){ return !c._hidden; });
+    for (var c of visible) layout(c, depth+1, counter);
+    if (visible.length > 0) {
+      node._x = (visible[0]._x + visible[visible.length-1]._x) / 2;
+    } else {
+      node._x = counter.v++ * (NODE_W + H_GAP);
+    }
+  }
+}
+
+function maxDepth(n) {
+  if (!n.children || n.children.length === 0 || n._collapsed) return 0;
+  var visible = n.children.filter(function(c){ return !c._hidden; });
+  if (visible.length === 0) return 0;
+  return 1 + Math.max.apply(null, visible.map(maxDepth));
+}
+
+function countLeaves(n) {
+  if (!n.children || n.children.length === 0 || n._collapsed) return 1;
+  var visible = n.children.filter(function(c){ return !c._hidden; });
+  if (visible.length === 0) return 1;
+  return visible.reduce(function(s,c){ return s + countLeaves(c); }, 0);
+}
+
+function render() {
+  var counter = {v:0};
+  layout(root, 0, counter);
+  var W = Math.max(counter.v * (NODE_W + H_GAP) + 40, 600);
+  var H = (maxDepth(root)+1) * (NODE_H + V_GAP) + 60;
+
+  var svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+
+  drawEdges(svg, root);
+  drawNodes(svg, root);
+  document.getElementById('treesvg').innerHTML = '';
+  document.getElementById('treesvg').appendChild(svg);
+}
+
+var COLORS = { rule:'#a78bfa', token:'#22d3ee', error:'#ff8787' };
+var BG     = { rule:'#1e1637', token:'#0a3a52', error:'#5a1a1a' };
+
+function drawEdges(svg, node) {
+  if (!node.children || node._collapsed) return;
+  var visible = node.children.filter(function(c){ return !c._hidden; });
+  for (var c of visible) {
+    var line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', node._x + NODE_W/2);
+    line.setAttribute('y1', node._y + NODE_H);
+    line.setAttribute('x2', c._x + NODE_W/2);
+    line.setAttribute('y2', c._y);
+    line.setAttribute('stroke','#3e4263');
+    line.setAttribute('stroke-width','1.5');
+    svg.appendChild(line);
+    drawEdges(svg, c);
+  }
+}
+
+function drawNodes(svg, node) {
+  if (node._hidden) return;
+
+  var g = document.createElementNS('http://www.w3.org/2000/svg','g');
+  g.style.cursor = node.children && node.children.length > 0 ? 'pointer' : 'default';
+  (function(n){ g.onclick = function(e){ e.stopPropagation(); toggleCollapse(n); }; })(node);
+
+  // Box
+  var rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  rect.setAttribute('x', node._x);
+  rect.setAttribute('y', node._y);
+  rect.setAttribute('width', NODE_W);
+  rect.setAttribute('height', NODE_H);
+  rect.setAttribute('rx', '7');
+  rect.setAttribute('fill', BG[node.kind] || '#1e293b');
+  rect.setAttribute('stroke', COLORS[node.kind] || '#334155');
+  rect.setAttribute('stroke-width', node._collapsed ? '2.5' : '1.5');
+  g.appendChild(rect);
+
+  // Collapse indicator dot
+  if (node.children && node.children.length > 0) {
+    var dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    dot.setAttribute('cx', node._x + NODE_W - 9);
+    dot.setAttribute('cy', node._y + 9);
+    dot.setAttribute('r', '4');
+    dot.setAttribute('fill', node._collapsed ? COLORS[node.kind] : 'transparent');
+    dot.setAttribute('stroke', COLORS[node.kind] || '#334155');
+    dot.setAttribute('stroke-width','1.5');
+    g.appendChild(dot);
+  }
+
+  // Label — split on \n for two-line display
+  var parts = node.label.split('\\n');
+  var mainLabel = parts[0];
+  var subLabel  = parts.length > 1 ? parts[1] : '';
+  var fontSize  = mainLabel.length > 16 ? 9 : (mainLabel.length > 11 ? 10 : 12);
+  var yMain = node._y + (subLabel ? 15 : 24);
+
+  var txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+  txt.setAttribute('x', node._x + NODE_W/2);
+  txt.setAttribute('y', yMain);
+  txt.setAttribute('text-anchor','middle');
+  txt.setAttribute('font-size', fontSize);
+  txt.setAttribute('font-family','Consolas,monospace');
+  txt.setAttribute('fill', COLORS[node.kind] || '#e2e8f0');
+  txt.textContent = mainLabel;
+  g.appendChild(txt);
+
+  if (subLabel) {
+    var sub = document.createElementNS('http://www.w3.org/2000/svg','text');
+    sub.setAttribute('x', node._x + NODE_W/2);
+    sub.setAttribute('y', node._y + 30);
+    sub.setAttribute('text-anchor','middle');
+    sub.setAttribute('font-size','8');
+    sub.setAttribute('font-family','Consolas,monospace');
+    sub.setAttribute('fill','#64748b');
+    sub.textContent = subLabel;
+    g.appendChild(sub);
+  }
+
+  svg.appendChild(g);
+
+  if (!node._collapsed) {
+    var visible = node.children ? node.children.filter(function(c){ return !c._hidden; }) : [];
+    for (var c of visible) drawNodes(svg, c);
+  }
+}
+
+function toggleCollapse(node) {
+  if (!node.children || node.children.length === 0) return;
+  node._collapsed = !node._collapsed;
+  setHidden(node.children, node._collapsed);
+  render();
+}
+
+function setHidden(children, val) {
+  for (var c of children) {
+    c._hidden = val;
+    if (c.children) setHidden(c.children, val);
+  }
+}
+
+// Initial render after page load
+window.addEventListener('load', function() { render(); });
+)js";
+
+    f << "</script></div>\n"; // close treepanel
+
+    // ── Tab 6: TAC + Target ───────────────────────────────
     f << "<div class='panel' id='codepanel'>\n";
     if (allErrors.empty()) {
         f << "<div class='two-col'>\n";
@@ -527,7 +737,7 @@ inline void exportHTML(
             bool isLbl = !line.empty() && line.back() == ':';
             f << "<div class='code-line" << (isLbl ? " label-line" : "") << "'>"
               << "<span class='code-ln'>" << i << "</span>"
-              << "<span class='code-op'>" << line << "</span>"
+              << "<span class='code-args'>" << line << "</span>"
               << "</div>\n";
         }
         f << "</pre></div>\n";
@@ -545,21 +755,22 @@ inline void exportHTML(
               << "</div>\n";
         }
         f << "</pre></div>\n";
-        f << "</div>\n"; // two-col
+        f << "</div>\n";
     } else {
-        f << "<div class='empty-state'><p>Code generation skipped due to compilation errors.</p></div>\n";
+        f << "<div class='empty-state'>Code generation skipped due to errors.</div>\n";
     }
-    f << "</div>\n"; // codepanel
+    f << "</div>\n";
 
-    // ── Close + tab JS ────────────────────────────────────────
+    // ── Close panel-wrap + tab switcher JS ────────────────
     f << R"html(
-</div> <!-- panel-wrap -->
+</div>
 <script>
 function show(id, el) {
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
+  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
   document.getElementById(id).classList.add('active');
   el.classList.add('active');
+  if (id === 'treepanel') render();
 }
 </script>
 </body></html>
