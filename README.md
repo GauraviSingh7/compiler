@@ -147,7 +147,7 @@ statement → variable := expression
 
 ### 🔧 Compile
 ```bash
-g++ -std=c++17 -Wall lexer.cpp parser.cpp symtable.cpp icg.cpp codegen.cpp main.cpp -o compiler
+g++ -std=c++17 -Wall lexer.cpp parser.cpp codegen.cpp main.cpp -o compiler
 ```
 
 ### ▶️ Run (Windows PowerShell)

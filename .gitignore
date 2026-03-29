@@ -1,5 +1,28 @@
-broken.txt
 compiler.exe
-test.txt
-broken.txt.html
-test.txt.html
+*.txt
+*.pas
+output.json
+# Node
+node_modules/
+*.log
+
+# Vite build output
+frontend/dist/
+frontend/.vite/
+
+# C++ build artifacts
+backend/*.o
+# DO NOT ignore the compiler binary — it needs to be committed for Render
+# backend/compiler   ← keep this line commented
+
+# Temp files from compiler runs
+*.pas.json
+*.pas.html
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
