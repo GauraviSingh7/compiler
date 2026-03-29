@@ -1,0 +1,82 @@
+.editorWrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  background: var(--editor-bg);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+/* Line numbers gutter */
+.gutter {
+  flex-shrink: 0;
+  width: 48px;
+  background: var(--editor-gutter);
+  border-right: 1px solid var(--border);
+  padding: 12px 0;
+  overflow: hidden;
+  user-select: none;
+}
+
+.lineNum {
+  text-align: right;
+  padding-right: 10px;
+  color: var(--editor-ln);
+  font-size: 12px;
+  line-height: 1.75;
+  white-space: nowrap;
+}
+
+/* Highlight overlay */
+.highlightLayer {
+  position: absolute;
+  top: 0;
+  left: 49px;      /* gutter width + border */
+  right: 0;
+  bottom: 0;
+  padding: 12px 16px;
+  overflow: hidden;
+  pointer-events: none;
+  white-space: pre;
+  word-break: break-all;
+}
+
+.hlLine {
+  line-height: 1.75;
+  min-height: 1.75em;
+  white-space: pre;
+}
+
+/* Transparent textarea sits over highlight layer */
+.textarea {
+  position: absolute;
+  top: 0;
+  left: 49px;
+  right: 0;
+  bottom: 0;
+  padding: 12px 16px;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--editor-cursor);
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.75;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Syntax token colors */
+.keyword { color: var(--tok-keyword); font-weight: 500; }
+.number  { color: var(--tok-number); }
+.string  { color: var(--tok-string); }
+.ident   { color: var(--tok-ident); }
+.op      { color: var(--tok-op); }
+.comment { color: var(--tok-comment); font-style: italic; }
+.plain   { color: var(--text-main); }

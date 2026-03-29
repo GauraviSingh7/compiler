@@ -1,0 +1,7 @@
+.bar { display:flex; align-items:center; gap:16px; padding:0 16px; height:24px;
+  background:var(--bg-light); border-top:1px solid var(--border);
+  font-size:11px; color:var(--text-muted); flex-shrink:0; }
+.ok  { color:var(--green); }
+.err { color:var(--red); }
+.compiling { color:var(--yellow); }
+.right { margin-left:auto; }

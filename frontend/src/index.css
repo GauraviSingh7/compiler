@@ -1,0 +1,61 @@
+/* ── Design tokens — match html_export.h palette exactly ── */
+:root {
+  --bg-base:       #ffffff;
+  --bg-light:      #f8f8f8;
+  --bg-mid:        #f3f4f6;
+  --panel-bg:      #ffffff;
+  --border:        #e5e7eb;
+  --border-light:  #d1d5db;
+  --accent:        #606060;
+  --accent-hover:  #404040;
+  --green:         #059669;
+  --red:           #dc2626;
+  --yellow:        #d97706;
+  --cyan:          #0891b2;
+  --text-main:     #111827;
+  --text-sec:      #4b5563;
+  --text-muted:    #9ca3af;
+  --mono:          'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --sans:          'DM Sans', -apple-system, 'Segoe UI', sans-serif;
+
+  /* Editor specific */
+  --editor-bg:     #fafafa;
+  --editor-gutter: #f3f4f6;
+  --editor-ln:     #9ca3af;
+  --editor-cursor: #606060;
+
+  /* Token colors */
+  --tok-keyword:   #7c3aed;
+  --tok-number:    #0891b2;
+  --tok-string:    #059669;
+  --tok-ident:     #111827;
+  --tok-op:        #dc2626;
+  --tok-comment:   #9ca3af;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-main);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* Selection */
+::selection { background: rgba(96,96,96,0.15); }
+
+button { font-family: var(--sans); cursor: pointer; }
