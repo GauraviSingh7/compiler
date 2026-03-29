@@ -9,17 +9,22 @@ import { writeFile, unlink, readFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { randomBytes } from "crypto";
+import { chmod } from "fs/promises";
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
 const PORT = process.env.PORT || 3001;
-const COMPILER_PATH = process.env.COMPILER_PATH || "./compiler";
+const COMPILER_PATH = join(process.cwd(), "compiler");
 
 // ── POST /compile ─────────────────────────────────────────
 app.post("/compile", async (req, res) => {
+  console.log("REQUEST RECEIVED");       
+  console.log("BODY:", req.body);               
+
   const { source } = req.body;
+  console.log("SOURCE:", source);  
   if (!source || typeof source !== "string") {
     return res.status(400).json({ error: "Missing source field" });
   }
@@ -30,6 +35,11 @@ app.post("/compile", async (req, res) => {
 
   try {
     await writeFile(srcFile, source, "utf8");
+
+    await chmod(COMPILER_PATH, 0o755).catch(() => {});
+
+    console.log("Running compiler:", COMPILER_PATH);
+    console.log("Temp files:", srcFile, jsonOut);
 
     await new Promise((resolve, reject) => {
       execFile(
@@ -50,8 +60,9 @@ app.post("/compile", async (req, res) => {
     const result = JSON.parse(raw);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  } finally {
+  console.error("ERROR:", err);
+  res.status(500).json({ error: err.message });
+  }finally {
     await unlink(srcFile).catch(() => {});
     await unlink(jsonOut).catch(() => {});
   }
