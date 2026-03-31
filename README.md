@@ -55,43 +55,49 @@ end.
 
 ---
 
-## Repository Structure
-
+## Project Structure
+ 
 ```
 .
-├── compiler-src/              ← C++ compiler source
-│   ├── lexer.h / lexer.cpp    ← Lexical analyzer
-│   ├── parser.h / parser.cpp  ← Recursive descent parser + AST + ICG driver
-│   ├── icg.h                  ← TAC engine (temps, labels, instruction list)
-│   ├── codegen.h / codegen.cpp← Pseudo-assembly code generator
-│   ├── symtable.h             ← Symbol table
-│   ├── ast.h                  ← AST node definition
-│   ├── html_export.h          ← Static HTML visualizer export
-│   ├── json_export.h          ← JSON export for the IDE backend
-│   ├── token_printer.h        ← Token type → string utility
-│   ├── main.cpp               ← Compiler driver
-│   └── Makefile
+├── compiler-src/              # C++ compiler source
+│   ├── lexer.h / lexer.cpp
+│   ├── token_printer.h
+│   ├── parser.h / parser.cpp
+│   ├── symtable.h / symtable.cpp
+│   ├── icg.h / icg.cpp
+│   ├── codegen.h / codegen.cpp
+│   ├── main.cpp               
+│   └── json_export.h          
 │
-├── backend/                   ← Node.js / Express API
-│   ├── server.js              ← POST /compile endpoint
-│   └── package.json
+├── backend/
+│   ├── server.js              # Express API — POST /compile
+│   ├── package.json
+│   ├── Makefile               # builds the compiler binary
+│   └── compiler               # compiled Linux x86-64 binary
 │
-└── frontend/                  ← React + Vite IDE
-    ├── src/
-    │   ├── App.jsx            ← Split-pane layout with drag-to-resize
-    │   ├── components/
-    │   │   ├── Editor.jsx     ← Code editor with syntax highlighting
-    │   │   ├── OutputPanel.jsx← Tab switcher
-    │   │   ├── Toolbar.jsx
-    │   │   ├── StatusBar.jsx
-    │   │   └── tabs/
-    │   │       ├── TokensTab.jsx
-    │   │       ├── SymbolsTab.jsx
-    │   │       ├── ErrorsTab.jsx
-    │   │       ├── ParseTreeTab.jsx   ← Collapsible SVG tree
-    │   │       ├── TACTab.jsx
-    │   │       └── TargetTab.jsx
-    └── package.json
+├── frontend/
+│   ├── index.html
+│   ├── vite.config.js
+│   ├── package.json
+│   └── src/
+│       ├── App.jsx           
+│       ├── index.css          
+│       └── components/
+│           ├── Toolbar.jsx
+│           ├── Editor.jsx     
+│           ├── OutputPanel.jsx
+│           ├── StatusBar.jsx
+│           └── tabs/
+│               ├── TokensTab.jsx
+│               ├── SymbolsTab.jsx
+│               ├── ErrorsTab.jsx
+│               ├── ParseTreeTab.jsx   
+│               ├── TACTab.jsx
+│               ├── TargetTab.jsx
+│               └── Tab.module.css
+│
+├── .gitignore
+└── README.md
 ```
 
 ---
@@ -133,7 +139,7 @@ node server.js
 # Listening on http://localhost:3001
 ```
 
-The backend expects the compiled `compiler` binary at the path set by `COMPILER_PATH` (defaults to `./compiler`). Copy or symlink the binary from `compiler-src/` into `backend/`.
+The backend expects the compiled `compiler` binary at the path set by `COMPILER_PATH` (defaults to `./compiler`).
 
 ### 2. Start the frontend
 
